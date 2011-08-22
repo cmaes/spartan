@@ -1,0 +1,636 @@
+\documentclass[10pt]{article}
+\usepackage{fullpage}
+\usepackage{fancyvrb}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{amsthm}
+\usepackage{bbm}
+\usepackage{titling}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true}
+%\usepackage{algorithm}
+%\usepackage{algorithmic}
+
+%\newfont{\sansf}{cmss10}
+%\newfont{\solverf}{cmss10 scaled 1000}
+\newcommand{\solverf}{\sffamily}
+\newfont{\bssten}{cmssbx10}
+\newfont{\bssnine}{cmssbx10 scaled 900}
+\newfont{\bssdoz}{cmssbx10 scaled 1200}
+
+%\setlength{\parskip}{1ex plus 0.5ex minus 0.2ex}
+%\setlength{\parindent}{0in}
+
+\newcommand{\norm}[1]{\left\lVert\,#1\,\right\rVert}
+\newcommand{\rank}{\mathrm{rank}}
+\newcommand{\abs}[1]{\left\vert #1 \right\vert}
+\newcommand{\set}[2]{\left\{#1  \left| #2\right\}\right.}
+\newcommand{\Z}{\mathbbm{Z}}
+\newcommand{\R}{\mathbbm{R}}
+\newcommand{\grad}{\nabla}
+\newcommand{\eps}{\epsilon}
+\newcommand{\ee}{\mathtt{e}}
+\renewcommand{\vec}[1]{{\boldsymbol #1}}
+\newcommand{\Aop}{\mathcal{A}}
+\newcommand{\Bop}{\mathcal{B}}
+\newcommand{\dims}[2]{\R^{#1 \times #2}}
+\newcommand{\diag}{\mathrm{diag}}
+\newcommand{\solutionset}{\mathcal{S}}
+\newcommand{\range}{\mathcal{R}}
+\newcommand{\xstar}{x^{\star}}
+
+\newcommand{\maximize}{\mathrm{maximize}}
+\newcommand{\minimize}{\text{minimize }}
+\newcommand{\find}{\text{find }}
+\newcommand{\st}{\text{subject to }}
+\renewcommand{\l}{\ell}
+\newcommand{\linspan}{\mathrm{span}}
+\newcommand{\interior}{\mathrm{int}}
+\newcommand{\possemidef}{\succeq}
+
+% Solvers and subroutines
+\newcommand{\matlab}{{\sc Matlab}}
+\newcommand{\scilab}{{\sc Scilab}}
+\newcommand{\spartan}{{\solverf SPARTAN}}
+\newcommand{\dsm}{{\solverf DSM}}
+\newcommand{\umfpack}{{\solverf UMFPACK}}
+\newcommand{\minpack}{{\solverf MINPACK}}
+\newcommand{\hybrd}{{\solverf HYBRD}}
+\newcommand{\hybrj}{{\solverf HYDRJ}}
+\newcommand{\tensolve}{{\solverf TENSOLVE}}
+\newcommand{\colpack}{{\solverf COLPACK}}
+\newcommand{\snopt}{{\solverf SNOPT}}
+\newcommand{\ipopt}{{\solverf Ipopt}}
+\newcommand{\loqo}{{\solverf LOQO}}
+\newcommand{\knitro}{{\solverf KNITRO}}
+\newcommand{\lmder}{{\solverf LMDER}}
+\newcommand{\levmar}{{\solverf levmar}}
+\newcommand{\csparse}{{\solverf CSPARSE}}
+
+\DefineShortVerb{\@}
+
+\begin{document} 
+
+\author{Christopher Maes}
+\title{\spartan : A Sparse Trust-region Algorithm for Nonlinear Equations\thanks{This work was supported by Google's Summer of Code program and the Scilab Consortium}}
+\date{August 17, 2009}
+\newcommand{\shorttitle}{{\solverf SPARTAN}}
+\pretitle{\begin{center}\Large}
+\posttitle{\par\end{center}\vskip 0.5em}
+\predate{\begin{center}\normalsize}
+\postdate{\par\end{center}}
+\thanksmarkseries{fnsymbol}
+\maketitle
+\begin{abstract}
+\spartan{} solves square systems of nonlinear equations, $F(x) = 0$,
+with sparse derivatives. It is written in ANSI/ISO C, with a \scilab{}
+and \matlab{} interface, and released under the GPL. \spartan{} relies
+on Tim Davis's \umfpack{} routines to efficiently solve a
+sequence of sparse linear systems, and Coleman, Garbow, and Mor\'{e}'s
+\dsm{} subroutine to compute a column coloring of the Jacobian matrix. 
+\end{abstract}
+
+\subsection*{Overview}
+
+\spartan{} is a library for solving  systems of nonlinear equations
+\begin{equation}
+F(x) = 0,
+\label{nonlineqn}
+\end{equation}
+where $F$ is a function from $\R^n \to \R^n$ that has at least one
+continuous derivative. The Jacobian matrix $J = F'(x)$ is defined by
+\begin{equation*}
+J_{ij}  = \frac{\partial F_i(x)}{\partial x_j}, \quad i,j = 1, \ldots, n.
+\end{equation*}
+\spartan{} is designed to solve nonlinear systems with sparse
+Jacobians (those having few nonzero entries). 
+
+
+\subsection*{When not to use \spartan{}}
+
+\spartan{} should not be used to compute solutions to $F(x) = 0$ when
+there are number of equations is not equal to the number of unknowns
+(\emph{i.e.\ }$F: \R^m \to \R^n$ with $m \ne n$). That problem should
+be solved with nonlinear least-squares solvers such as \lmder{}
+\cite{minpack} or \levmar{} \cite{levmar:website}. \spartan{} should
+not be used if there are bounds on the variables (\emph{e.g.\ }$\l \le
+x \le u$); in this case, more general sparse nonlinear optimization
+solvers such as \ipopt{}\cite{ipopt:website} or \snopt{}
+\cite{snopt:website} are required.
+
+Routines like \minpack's \cite{minpack} \hybrd{} and \hybrj{}
+outperform \spartan{} when $n$ is fairly small (\emph{e.g.\ }$n \le
+100$) or the Jacobian is dense. The \tensolve{} \cite{tensolve}
+package can also be used to solve systems with dense derivatives.
+
+\subsection*{Solving a small nonlinear system with \spartan}
+
+The easiest way to use \spartan{} is within \scilab{} or \matlab. Suppose
+we wish to solve the small system of equations \cite{powelldogleg}
+\begin{equation}
+\begin{aligned}
+F_1(x) &= 10 (x_2 - x_1^2) &= 0 \\
+F_2(x) &= 1 - x_1          &= 0 
+\end{aligned}
+\label{powellssystem}
+\end{equation}
+with Jacobian matrix $J$ given by 
+\begin{equation}
+J =  \begin{pmatrix} -20 x_1 & 10 \\ -1 & 0 \end{pmatrix}.
+\label{powellsystemjacobian}
+\end{equation}
+In \scilab{} version x.xx, the system is solved with the following
+code: 
+\begin{Verbatim}[fontsize=\small]
+function [f,J] = powell(x) 
+   f(1) = 10*(x(2) - x(1)^2); f(2) = 1 - x(1);
+   J = sparse([ -20*x(1) 10; -1 0]);
+endfunction 
+options = init_param(); options = add_param(options,'Jacobian','on');
+x0 = [-3; 4]; 
+x = fsolve(powell,x0,options);
+\end{Verbatim}
+For large systems the Jacobian should be constructed in a more
+efficient manner; see the following section on forming sparse
+Jacobians. The \matlab{} code to solve \eqref{powellssystem}
+is similar (with @fsolve@ replaced by the MEX function
+@spartan_solve@). Calling \spartan{} from C is discussed in the
+section on the C interface.
+
+\subsection*{Singular Jacobians}
+\spartan{} employees a trust-region algorithm to minimize the merit
+function $f(x) = \norm{F(x)}_2^2$. If $f$ has a global minimum of zero
+then \eqref{nonlineqn} has a solution. \spartan{} computes a vector
+$x_s$ that is a local minimum of $f$, namely, $x_s$ satisfies
+$J(x_s)^T F(x_s) = 0$. Unfortunately, if $J(x_s)$ is singular and
+$f(x_s) > 0$ then $F(x_s) \ne 0$ and so $x_s$ is not a solution. In
+this case, \spartan{} reports convergence to a local minimum and it is
+suggested that the user resolve with a different initial estimate of
+the solution.
+
+The trust-region algorithm is capable of handling singular Jacobians
+that arise during the normal course of algorithm.
+
+\subsection*{Forming a Sparse Jacobian}
+
+For large problems it is crucial that the user construct the sparse
+Jacobian efficiently. When using \scilab{} or \matlab{} the user should
+\emph{not} form @J@ via @J = sparse(Jdense)@, as is done for the small
+system above. This method involves creating a $n \times n$
+\emph{dense} matrix that requires $n^2$ elements of storage. This can
+be prohibitively expensive when $n$ is large. For instance, when $n =
+10,000$ the matrix @Jdense@ will require 763 megabytes of
+memory to store.
+
+When @J@ is sparse it is best construct @J@ in triplet form. For
+example, the Jacobian in \eqref{powellsystemjacobian} could be
+constructed with:
+\begin{Verbatim}[fontsize=\small]
+n = 2; 
+i = [ 1; 1; 2];
+j = [ 1; 2; 1];
+v = [ -20*x(1); 10; -1];
+\end{Verbatim}
+and the command {\tt sparse([i j], v, [n, n])} in \scilab{}, or 
+{\tt sparse(i,j,v,n,n)} in \matlab{}.
+
+\subsection*{Checking Derivatives}
+ 
+The most common bug (and cause of failure) is an error in the code
+that constructs derivatives. \spartan{} contains a routine to check
+the derivatives provided by the user to ensure they are consistent
+with the definition of the function.
+
+Users of \scilab{} can enable this routine by setting the 
+option @DerivativeCheck@ to @on@.  For example:
+\begin{Verbatim}[fontsize=\small]
+options = init_param();  options = add_param(options,'Jacobian','on'); 
+options = add_param(options,'DerivativeCheck','on');
+x0 = [-3 4]; 
+x = fsolve(powell,x0,options);
+\end{Verbatim}
+
+
+\subsection*{Computing Derivatives via Sparse Finite-Differences}
+
+Often, it is difficult, or time-consuming to compute the analytical
+Jacobian.  Fortunately, when the Jacobian is sparse it can often be
+quickly estimated with function values alone via finite-differences.
+
+To estimate derivatives via finite-differences the user must provide
+the Jacobian's sparsity pattern.  Computing the sparsity pattern is
+much easier then computing the analytical Jacobian. The sparsity
+pattern $\hat{J}$ is defined as 
+\begin{equation}
+\hat{J}_{ij} = \begin{cases}  1 & \text{if } \frac{\partial F_i(x)}{\partial x_j} \ne 0 \text{ for some } x \in \R^n \\
+                              0 &  \text{otherwise}.
+               \end{cases}
+\end{equation}
+A simple rule to follow is that $\hat{J}_{ij} = 1$ if $F_i$ is a function of $x_j$.
+
+\spartan{} uses the \dsm{} subroutine of Coleman, Garbow, and Mor\'{e}
+\cite{algorithm618,columncoloring} to compute a coloring of the column graph of
+$\hat{J}$. The number of colors in this graph coloring indicates the
+number of function evaluations required to estimate $J(x)$ through
+finite-differences in the form:
+\begin{equation}
+\frac{F(x+\epsilon p) - F(x)}{\epsilon} \simeq J(x) p_k, 
+\end{equation}
+where $p = \sum_{j \in \mathcal{C}_k} e_j$, with $e_j$  
+the $j$th column of the identity matrix, and $\mathcal{C}_k$ 
+a set of columns of the same color.
+
+Users of \scilab{} can enable computing the Jacobian through sparse
+finite-differences by providing the sparsity pattern $\hat{J}$ via 
+the option @JacobPattern@: 
+\begin{Verbatim}[fontsize=\small]
+function f = powell_nd(x) 
+   f(1) = 10*(x(2) - x(1)^2); f(2) = 1 - x(1);
+endfunction 
+Jhat = sparse([ 1 1; 1 0]);
+options = init_param();  options = add_param(options,'JacobPattern',Jhat);
+x0 = [-3 4]; 
+x = fsolve(powell_nd,x0,options);
+\end{Verbatim}
+
+
+
+\subsection*{Algorithm}
+A trust-region algorithm is used to solve the optimization 
+problem 
+\begin{equation}
+\underset{x \in \R^n}{\minimize} f(x) \equiv \norm{F(x)}^2_2
+\end{equation}
+The gradient $g(x)$ and Hessian $H(x)$ of the merit-function $f(x)$ are 
+given by 
+\begin{equation}
+g(x) \equiv \grad f(x) = J^T(x) F(x), \quad H(x) \equiv \grad^2 f(x) = 
+J^T(x) J(x)  + \sum_{i=1}^n F_i(x) \grad^2 F_i(x)
+\end{equation}
+An approximation to the Hessian $\hat{H}(x) = J(x)^T J(x)$ is used
+that does not contain the nonconvex (and second derivative) term
+$\sum_{i=1}^n F_i(x) \grad^2 F_i(x)$.
+
+At each iteration an approximate solution to the trust-region subproblem
+\begin{equation}
+\begin{array}{ll}
+\underset{p}{\minimize} & \norm{J(x) p + F(x)}\\
+\st                     & \norm{Dp} \le \Delta
+\end{array}
+\label{trustregionsubproblem}
+\end{equation}
+is computed using Powell's dogleg method
+\cite{powellhybrid,powelldogleg}.  The approximate solution
+$\tilde{p}$ is in the form $\tilde{p} = p_C + \alpha(p_N - p_C)$ for
+some $\alpha \in [0,1]$. Here $p_C$ is the Cauchy direction $p_C =
+-\lambda g$ (for some $\lambda \ge 0$) and $p_N$ is the Newton
+direction defined via $J(x) p_N = -F(x)$. \umfpack{}
+\cite{acmtomsumfpack} is used to compute a sparse LU factorization of
+$J(x)$ to solve for $p_N$. If \umfpack{} declares that $J(x)$ is
+singular then $\tilde{p}$ is taken to be $p_C$.
+
+If $f(x+p) \le \eta f(x)$ (for some $\eta \in [0,1/4)$) the solution
+estimate $x$ is updated via $x = x + p$.  The trust-region radius
+$\Delta$ is adjusted via the algorithm described in
+\cite[pp. 291]{nocedalwright}.
+
+
+
+\subsection*{C Interface}
+
+The following is a list of \spartan's primary routines and data structures:
+\begin{enumerate}
+\item @spartan_index@: the basic integer type used in \spartan{} for
+indices and dimensions of sparse matrices. If the @LP64@ symbol is 
+defined @sizeof(spartan_index) = 8@ otherwise @sizeof(spartan_index) = 4@. 
+The 64-bit version of @spartan_index@ is useful for large sparse matrices,
+and compatibility with \matlab's @-largeArrayDimensions@ MEX option. 
+
+\item @spartan_sparse@: a sparse matrix stored in either compressed-column
+format or triplet (coordinate form).  The sparse matrix @A@, in compressed 
+column form, contains:
+\begin{itemize}
+\item @A->p@, a @spartan_index@ array of column pointers of size
+  @A->n+1@.
+\item @A->i@, a @spartan_index@ array of row  indices of size @A->nzmax@.
+\item @A->x@, a @double@ array of size @A->nzmax@. 
+\end{itemize}
+The row indices of the $j$th column of $A$ are stored in 
+@A->i[A->p[j]]@ thorough @A->i[A->p[j+1]-1]@. The values of the 
+$j$th column of $A$ are stored in @A->x[A->p[j]]@ through 
+@A->x[A->p[j+1]-1]@.
+
+Compressed column format is an efficient data structure for storing
+and factorizing a sparse matrix. However, it can be difficult for 
+users to construct matrices in this form. So, in addition, a sparse 
+matrix can be stored in triplet format. The sparse matrix @A@, in 
+triplet format, contains:
+\begin{itemize}
+\item @A->p@, a @spartan_index@ array of column indices of size
+  @A->nzmax@.
+\item @A->i@, a @spartan_index@ array of row  indices of size @A->nzmax@.
+\item @A->x@, a @double@ array of size @A->nzmax@. 
+\end{itemize}
+The index @A->i[k]@ contains the row index $i$, and the index  
+@A->p[k]@ contains the column index $j$ of the @k@th element $A_{ij}$. 
+The value of the @k@th nonzero element is stored in @A->x[k]@. 
+
+The total number of nonzero elements in the sparse matrix is
+@A->nzmax@. The value of @A->nz@ indicates whether a @spartan_sparse@
+matrix is stored in compressed sparse column or triplet format.
+
+\item @spartan_spalloc@: Allocates memory for a @spartan_sparse@ matrix. 
+\item @spartan_spfree@: Frees memory used by a @spartan_sparse@ matrix.
+\item @spartan_entry@: Inserts an entry into a sparse matrix stored in triplet format.
+\item @spartan_compress@: Converts a @spartan_sparse@ matrix from triplet
+format to compressed-column format.
+\item @spartan_function@: The user provided routine that computes
+  $F(x)$ and stores the result in @f@, a @double@ array of size
+  @n@. The routine should @return@ zero on success. If the routine
+  returns a nonzero value the solve is stopped.
+\item @spartan_jacobian@: The user provided routine that computes
+  $J(x)$ and stores the result in @**J@ an @n@ by @n@ @spartan_sparse@
+  matrix.  A @spartan_sparse@ matrix can be allocated inside this
+  routine via @*J = spartan_spalloc(...)@. In this case the option
+  @SPARTAN_MEMMGMT@ should be set so \spartan{} can free the matrix
+  with @spartan_spfree@.
+
+\item @spartan_solve@: \spartan{}'s main routine to compute 
+a solution $x$ such that  $F(x) = 0$.
+\end{enumerate}
+
+\subsubsection*{C Example}
+
+The following code shows how to use \spartan{} to solve
+the system:
+\begin{equation}
+\begin{aligned} F_1(x) &= (3 - h x_1)x_1 - 2 x_2 + 1 \\
+              F_i(x) &= (3 - h x_i)x_i - x_{i-1} - 2 x_{i+1} + 1, \quad i=2, \ldots, n-1\\
+              F_n(x) &= (3 - h x_{n-1}) x_{n-1} - x_{n-1} + 1
+\end{aligned}
+\quad \text{with} \quad
+J(x)_{ij} = 
+\begin{cases} -1 & j = i-1 \\
+3 - 2hx_i        & j = i   \\
+-2               & j = i+1 \\
+\end{cases}
+\end{equation}
+\begin{Verbatim}[fontsize=\small]
+#include <stdio.h>
+#include "spartan.h"
+double h = 0.5;
+int broydenfunc(double *f, const double *x, spartan_index n){
+  spartan_index i;
+  f[0] = (3 - h*x[0])*x[0] - 2*x[1] + 1;
+  for(i=1; i<=n-2; i++)
+    f[i] = (3 - h*x[i])*x[i] - x[i-1] - 2*x[i+1] + 1;
+  f[n-1] = (3 - h*x[n-1])*x[n-1] - x[n-1] + 1;
+  return(0);
+}
+
+int broydenjacob(spartan_sparse **J, const double *x, spartan_index n){
+  spartan_index nnz, i; spartan_sparse *T;
+  nnz = 2 + 3*(n-2) + 2;    /* The number of nonzeros in the tridiagonal jacobian */
+  T = spartan_spalloc(n,n,nnz,1,1);   /* Allocate Jacobian in triplet form*/ 
+  if (T == NULL) return(-1);   /* Check for out of memory error */ 
+  for (i = 0; i < n; i++){
+    if (i > 0) spartan_entry(T,i,i-1,-1);      /* sub diagonal entries */ 
+    spartan_entry(T, i, i, 3 - 2*h*x[i]);      /* Diagonal entries */ 
+    if (i < n-1) spartan_entry(T,i, i+1, -2);  /* superdiagonal entries */
+  }
+  *J = spartan_compress(T); /* convert from triplet to compressed-col */
+  T = spartan_spfree(T);   /* free matrix triplet matrix */
+  return(0);
+}
+
+void printstring(const char *s){ printf("%s\n",s); }
+
+int main(int argc, char **argv){
+  spartan_index j, n = 1024;
+  double *f, *x, opts[SPARTAN_OPTIONS]; 
+  int status, i;
+  f = malloc(sizeof(double)*n);   /* Allocate space for f and x */ 
+  x = malloc(sizeof(double)*n);
+  if (!x || !f) return(-1);       /* Check for out of memory errors */
+  for(i=0; i<SPARTAN_OPTIONS; i++) opts[i] =0;    /* Set spartan's default options */
+  opts[SPARTAN_MEMMGMT] = 1;   /* Tell spartan to free the Jacobian after use */
+  spartan_setprintfunction(printstring);   /* Set the print function for spartan output */
+  for (j=0;j<n;j++) x[j] = -1.;   /* Set x = -1 */
+  status = spartan_solve(broydenfunc, broydenjacob, n, f, x, opts); /* Solve the problem */
+  free(x); free(f); /* Clean up*/ 
+  return(0);
+}
+\end{Verbatim}
+\clearpage
+\subsubsection*{Spartan C Routines}
+
+This section describes the routines in \spartan{}. Routines marked
+with (\dag) are from \csparse{} \cite{directmethods}. The parameters
+and return values are labelled as one of the following:
+\begin{itemize}
+\item {\bf in:} The parameter must be defined on input. It is not modified. 
+\item {\bf in/out:} The parameter must be defined on input. It is modified on output. 
+\item {\bf returns:} The return value of each function. Functions that return a pointer
+return @NULL@ if an error occurs.
+\end{itemize}
+
+\subsubsection*{Primary Routines}
+
+\newcommand{\routinename}[2]{%
+\begin{center}
+\framebox[\textwidth][l]{{\tt #1}: {\bf #2}}
+\end{center}
+}
+
+\newenvironment{parametertable}
+{\begin{tabular}{p{0.5in}p{0.4in}p{4.5in}}}
+{\end{tabular}}
+
+\routinename{spartan\_index}{sparse matrix index}
+
+All matrix indices and dimensions in \spartan{} are of type
+@spartan_index@. The size of @spartan_index@ can be controlled at
+compile time. By default @spartan_index@ is a 4-byte integer. Defining
+the symbol @LP64@ (or @MATLAB_MEX@) forces @spartan_index@ to be an
+8-byte integer.
+
+\routinename{spartan\_sparse}{sparse matrix in compressed-column or
+  triplet form\dag}
+
+\begin{Verbatim}[fontsize=\small]
+typedef struct spartan_sp {
+  spartan_index nzmax; /* maximum number of entries */
+  spartan_index  m;    /* number of rows */ 
+  spartan_index  n;    /* number of cols */ 
+  spartan_index *p;    /* column pointers (size n+1) or col indices (size nzmax)*/ 
+  spartan_index *i;    /* row indices, size nzmax */
+  double        *x;    /* numerical values, size nzmax */  
+  spartan_index nz;    /* # of entries in triplet form, -1 for compressed-col*/ 
+} spartan_sparse ;
+\end{Verbatim}
+
+
+\routinename{spartan\_solve}{solve a system of nonlinear equations}
+\begin{Verbatim}[fontsize=\small]
+int spartan_solve(spartan_function usrfun, spartan_jacobian usrjac, spartan_index n, double *fval,
+                  double *x, double *opts);
+\end{Verbatim}
+Solves a system of nonlinear equations with sparse derivatives.\\[10pt]
+\begin{parametertable}
+@usrfun@ & in      & pointer to a user-defined function that evaluates $F(x)$ \\ 
+@usrjac@ & in      & pointer to a user-defined function that evaluates $J=F'(x)$\\
+@n@      & in      & the size of the system\\
+@fval@   & out     & function value at the solution\\
+@x@      & in/out  & on input an initial estimate of solution; on output the solution of the system\\
+@opts@   & in      & options \\
+         & returns & @SPARTAN_OK@ if sucessful, @SPARTAN_MEMORY_FAILURE@ if unable to allocate sufficient memory, 
+                     @SPARTAN_USER_ERROR@ if @usrfun@ returns nonzero, @SPARTAN_LOCAL_MIN@ if converged to
+                     local minimum, @SPARTAN_ITER_LIMIT@ if iteration limit reached\\
+\end{parametertable}
+
+
+
+\subsubsection*{Utility Routines}
+\routinename{spartan\_spalloc}{allocate a sparse matrix\dag}
+\begin{Verbatim}[fontsize=\small]
+spartan_sparse *spartan_spalloc (spartan_index m, spartan_index n, spartan_index nzmax, 
+                                 int values, int triplet) ;
+\end{Verbatim}
+
+Allocates a sparse matrix in either compressed-column or triplet form.\\[10pt]
+\begin{parametertable}
+@m@       & in & number of rows\\
+@n@       & in & number of columns \\
+@nzmax@   & in & maximum number of entries \\
+@values@  & in & allocate pattern only if @0@, values and pattern otherwise \\
+@triplet@ & in & compressed-column if @0@, triplet form otherwise \\
+          & returns & @A@ if successful; @NULL@ on error 
+\end{parametertable}
+
+\routinename{spartan\_spfree}{free a sparse matrix\dag}
+\begin{Verbatim}[fontsize=\small]
+spartan_sparse *spartan_spfree (spartan_sparse *A) ;
+\end{Verbatim}
+
+Frees a sparse matrix, in either compressed-column or triplet form. \\[10 pt]
+\begin{parametertable}
+@A@       & in/out & sparse matrix to free\\
+          & returns & @NULL@ 
+\end{parametertable}
+
+\routinename{spartan\_entry}{add an entry to a triplet form matrix\dag}
+@int spartan_entry(spartan_sparse *T, spartan_index i, spartan_index j, double x) ;@
+
+Memory-space and dimension of @T@ are increased if necessary.\\[10pt]
+\begin{parametertable}
+@T@  & in/out  & triplet matrix; new entry added on output\\
+@i@  & in      & row index of new entry\\
+@j@  & in      & column index of new entry\\
+@x@  & in      & numerical value of new entry\\
+     & returns & @1@ if successful; @0@ on error
+\end{parametertable}
+
+\routinename{spartan\_compress}{triplet form to compressed-column conversion\dag}
+@spartan_sparse *spartan_compress (const spartan_sparse *T) ;@
+
+Converts a triplet-form matrix @T@ into a compressed-column matrix @C@. The
+columns of @C@ are not sorted, and duplicate entries may be present in @C@.\\[10pt]
+\begin{parametertable}
+@T@    & in      & sparse matrix in triplet form\\
+       & returns & @C@ if successful; @NULL@ on error
+\end{parametertable}
+
+\routinename{spartan\_setprintfunction}{set routine to print output}
+
+
+\subsubsection*{Internal Routines}
+
+These routines are used internally by \spartan{}. They are documented
+here for completeness. The interface to these routines is subject to
+change; the user should not rely on these routines to persist between
+different version of \spartan{}.
+
+\paragraph{Computational Routines}
+\routinename{spartan\_dogleg}{computes an approximate solution to the trust-region subproblem}
+\routinename{spartan\_gaxpy}{$y \leftarrow Ax + y$\dag}
+\routinename{spartan\_gatxpy}{$y \leftarrow A^T x + y$}
+
+\paragraph{Vector operations (Level-1 BLAS)}
+\routinename{spartan\_dnrm2}{ $\norm{x}_2$}
+\routinename{spartan\_ddot}{$y^T x$}
+\routinename{spartan\_dscal}{$x \leftarrow \alpha x$}
+\routinename{spartan\_daxpy}{$y \leftarrow \alpha x + y$}
+\routinename{spartan\_dcopy}{$y \leftarrow x$}
+\routinename{spartan\_dmult}{$z \leftarrow x {.*} y$}
+\routinename{spartan\_norminf}{$\norm{x}_\infty$}
+\routinename{spartan\_zero}{$x \leftarrow \mathbf{0}$}
+
+\paragraph{Memory routines}
+
+\routinename{spartan\_calloc}{allocate and clear memory\dag}
+\routinename{spartan\_malloc}{allocate memory\dag}
+\routinename{spartan\_realloc}{change size of a block of memory\dag}
+\routinename{spartan\_free}{free memory\dag}
+
+\paragraph{Output routines}
+\routinename{spartan\_print}{print strings}
+
+\paragraph{Sparse Utility routines}
+\routinename{spartan\_cumsum}{computes the cumulative sum of an array\dag}
+\routinename{spartan\_norms}{compute scaled column norms}
+\routinename{spartan\_done}{free memory and return a sparse matrix \dag}
+
+
+\subsection*{License}
+\spartan{} is released under the GPL. \spartan{} utilizes the GPL
+library \umfpack{} \cite{acmtomsumfpack}, derives code
+from the Lesser GPL routines \csparse{} \cite{directmethods},
+and uses the \dsm{} subroutine from ACM TOMS Algorithm 618
+\cite{algorithm618} released under the ACM Software License Agreement
+\cite{acmlicense}.
+
+\subsection*{Further Work}
+
+\spartan{} is an experimental solver. The following additional work would greatly improve it:
+\begin{itemize}
+\item Currently, @spartan_linsolve@ computes a symbolic factorization
+  of the Jacobian at each iteration. This is unnecessary if the sparsity pattern
+  of the Jacobian is fixed and known. This is the case when @spartan_sfdjac@ is used to
+  compute sparse finite-differences and when the user knows the
+  sparsity pattern. But, not when numerically zeros entries are removed
+  from the Jacobian matrix by \scilab{} or \matlab{}.  Add a function
+  @spartan_setpattern@ that can be called by the user to provide a
+  sparsity pattern, even when not computing the Jacobian via
+  finite-differences, and modify @spartan_initsfd@ to use this
+  function. Update the \scilab{} gateway interface and \matlab{} MEX
+  interface to call @spartan_setpattern@ when the @JacobPattern@ option 
+  is used.
+\item Add derivative checking to the C interface. See @checkderivative.sci@ 
+  for a \scilab{} implementation.
+\item \spartan's main computational routines @spartan_solve@ and
+  @spartan_dogleg@ use Level-1 BLAS vector operations.  These BLAS
+  operations are contained and implemented in @spartan_blas.c@. They
+  do not check for overflows, compute sums in numerically stable
+  manner, or take advantage of multiple processors. However, these
+  routines are portable and do not require an external BLAS
+  library. Add code to make the routines in @spartan_blas.c@ call
+  external BLAS routines.  Add the symbols @BLAS@ and @LBLAS@ that, when
+  defined at compile-time, cause these external BLAS routines to be
+  used. Be sure to handle the case when @spartan_index@ is a 64-bit 
+  integer (the @LBLAS@ option). 
+\item Develop a large set of sparse test problems and produce performance benchmarks.
+\item Develop the \matlab{} MEX interface. 
+\item Investigate using \colpack{} \cite{colpack:website} instead of \dsm{} to color the column graph of the Jacobian. 
+\item Investigate the performance of different methods for solving the
+  trust-region subproblem \eqref{trustregionsubproblem}. Other methods
+  include: searching in the two-dimensional subspace $\linspan
+  \{g,-J^{-1} g\}$, the double-dogleg method, or solving the problem
+  exactly.
+\end{itemize}
+
+\bibliographystyle{acm}
+\bibliography{references}
+\end{document}
+
+% LocalWords:  JacobPattern fontsize
